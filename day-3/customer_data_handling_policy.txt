@@ -1,0 +1,4 @@
+Customer data must be collected and stored securely according to company privacy standards. 
+Employees should only access customer information required for their job responsibilities. Sharing customer data with unauthorized 
+individuals or external parties is strictly prohibited. 
+All confidential customer records must be encrypted and deleted securely when no longer needed.

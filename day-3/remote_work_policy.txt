@@ -1,0 +1,4 @@
+Employees are allowed to work remotely up to 3 days per week with manager approval.
+All employees must remain available during core working hours from 10:00 AM to 4:00 PM. 
+Company devices must be used for all official work, and sensitive information should not be accessed on public Wi-Fi without a VPN. 
+Daily progress updates must be submitted through the company collaboration platform.
