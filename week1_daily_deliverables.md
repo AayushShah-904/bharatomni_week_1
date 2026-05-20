@@ -65,7 +65,7 @@ Day 2 was about making LLM interactions more reliable and structured. The focus 
 
 ---
 
-## Day 3 — Naive RAG: Understanding the Full Pipeline
+## Day 3 — Naive RAG Pipeline: From Documents to Answers
 
 **Date:** Day 3
 
@@ -150,18 +150,37 @@ Two key retrieval settings:
 
 ---
 
+### GitHub RAG App — Naive Implementation
+
+Applied the same pipeline to a real-world use case: querying any public GitHub repository. The codebase has three files:
+
+**`ingest.py`** — clones the repo (shallow, via `gitpython`), walks the file tree (skipping `node_modules`, lock files, files > 150 KB), splits each file using `RecursiveCharacterTextSplitter.from_language()` (so Python splits at functions/classes, JS at its own boundaries, etc.), embeds the chunks with `AzureOpenAIEmbeddings`, and stores them in a persisted **ChromaDB** collection. Also generates a directory tree document as an extra metadata chunk. Re-ingestion is skipped if the collection already exists.
+
+**`qa_engine.py`** — a deliberately **naive** QA class (`RepoQA`). Every user question goes through a simple 3-step process:
+1. `similarity_search(question, k=8)` — plain vector search, top-8 chunks
+2. Assemble a **3-layer context window**: system prompt → conversation history → retrieved chunks + question
+3. Stream the response and append source file citations
+
+The `summarize_repo()` method just returns a fixed greeting — there's no repo card generation here. That distinction matters: Day 4 replaces every one of these with a smarter alternative.
+
+**`app.py`** — Streamlit UI. User pastes a GitHub URL, clicks "Load repo", the spinner says "Initializing Q&A engine..." (no repo card build delay), and then they can start chatting. Has a "Force re-ingest" checkbox and "Clear conversation" button.
+
+---
+
 ### Key Implementations
-- Loaded policy docs with `TextLoader` and chunked with `RecursiveCharacterTextSplitter`
-- Embedded chunks with `AzureOpenAIEmbeddings` and stored in an in-memory vector store
-- Ran a `similarity_search` query to retrieve and print the most relevant policy chunks
-- Understood the trade-offs between all three splitters and both retrieval strategies
+- Loaded three local policy `.txt` files with `TextLoader` and ran a basic similarity search — the simplest possible RAG
+- Chunked documents with `RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)`
+- Embedded chunks with `AzureOpenAIEmbeddings` and stored them in a persisted **ChromaDB** vector store
+- Built `ingest.py` — GitHub repo clone → filter → language-aware chunking → embed → store (with re-ingestion skip)
+- Built `qa_engine.py` (naive version) — plain `similarity_search`, 3-layer context window, no HyDE / MMR / repo card
+- Built `app.py` — Streamlit UI for repo URL input, ingestion, and chat
 
 ### What I Learned
 - RAG has one job: get the right context in front of the model before it answers
-- `chunk_size` and `chunk_overlap` are small settings with a big impact on answer quality
-- The choice of splitter matters — recursive splitting respects natural language boundaries far better than character-based splitting
-- Top-K and Score Threshold are the two knobs that control what the LLM actually sees
-- Naive RAG is a great starting point, but the gaps become obvious quickly — which is exactly what Day 4 addresses
+- `chunk_size` and `chunk_overlap` are small settings with a big impact on answer quality — too large and chunks lose focus, too small and they lose context
+- The choice of splitter matters — recursive splitting respects natural language boundaries far better than simple character-based splitting
+- Plain `similarity_search` works, but it returns whatever is closest — it doesn't care about redundancy or diversity
+- The gap between a naive QA engine and a context-engineered one is not just performance — it's about knowing *why* each part of the context window exists
 
 ---
 
@@ -240,7 +259,7 @@ flowchart TD
 |-----|-----------|------------|
 | Day 1 | Azure OpenAI setup & Prompt Engineering | `summary.py` — meeting summarizer with streaming |
 | Day 2 | Multi-turn chat, Pydantic structured validation & output parsing | `interactive_chat.py`, `invoking_llm.py`, `main_langchain.py` |
-| Day 3 | Naive RAG — from local documents to GitHub repos | `rag.py` (policy docs), `ingest.py`, `qa_engine.py`, `app.py` |
+| Day 3 | Naive RAG — load, chunk, embed, store, retrieve, answer | `rag.py` (policy docs), `ingest.py`, `qa_engine.py` |
 | Day 4 | Context Engineering — HyDE, MMR, repo card, format hints | Refined `qa_engine.py` with a deliberate 6-layer context window |
 
 **Technologies used this week:** Python, Azure OpenAI (GPT-4.1-mini, text-embedding-ada-002), LangChain, ChromaDB, GitPython, Streamlit, Pydantic, dotenv
