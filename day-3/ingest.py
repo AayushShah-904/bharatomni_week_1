@@ -13,8 +13,8 @@ from typing import Generator
 import git
 from dotenv import load_dotenv
 
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter, Language
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain_chroma import Chroma
 
