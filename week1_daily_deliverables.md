@@ -1,9 +1,4 @@
 # Week 1 — Daily Deliverables
-**Internship | Bharatomni Technology**
-**Intern:** [Your Name]
-**Week:** Week 1 — Foundation to RAG Pipeline
-
----
 
 ## Day 1 — Getting Started with Azure OpenAI & Prompt Engineering
 
