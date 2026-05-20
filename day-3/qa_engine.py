@@ -1,8 +1,5 @@
-"""
-qa_engine.py — Naive RAG Q&A over an ingested GitHub repo.
-"""
-
-from __future__ import annotations
+# This file runs the Q&A engine that searches our database
+# and answers the user's questions about the codebase.
 
 import os
 from typing import Iterator
@@ -14,9 +11,7 @@ from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+# Basic settings for the Q&A assistant
 
 CHROMA_DIR      = "./chroma_db"
 COLLECTION_NAME = "github_repo"
@@ -24,9 +19,7 @@ TOP_K           = 8    # chunks returned to LLM
 MAX_HISTORY     = 6    # conversation turn pairs kept in context
 
 
-# ---------------------------------------------------------------------------
-# System prompt
-# ---------------------------------------------------------------------------
+# The instructions we give to the AI to define its behavior and tone
 
 SYSTEM_PROMPT = """\
 You are an expert software engineer assistant. Your job is to help users deeply \
@@ -36,9 +29,7 @@ Use markdown. Keep answers focused.
 """
 
 
-# ---------------------------------------------------------------------------
-# Retrieval helpers
-# ---------------------------------------------------------------------------
+# Helper functions for formatting search results and building conversation history
 
 def _format_docs(docs: list[Document]) -> str:
     parts = []
@@ -47,7 +38,9 @@ def _format_docs(docs: list[Document]) -> str:
         lang = doc.metadata.get("language", "")
         parts.append(f"### `{path}`\n```{lang}\n{doc.page_content}\n```")
     return "\n\n".join(parts)
-
+def root():
+    print("hello from react app.")
+    pass
 
 def _build_messages(
     question: str,
@@ -55,8 +48,8 @@ def _build_messages(
     history: list[dict],
 ) -> list[dict]:
     """
-    Assemble the message list:
-      system -> history -> current question + chunks
+    Combines the system prompt, chat history, and the newly retrieved code chunks
+    into a structured list of messages that the AI model can understand.
     """
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -76,19 +69,12 @@ def _build_messages(
     return messages
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+# Main Q&A Class
 
 class RepoQA:
     """
-    Naive Q&A over a Chroma vectorstore.
-
-    Context window per call:
-      [1] System prompt
-      [2] Windowed conversation history (last MAX_HISTORY turn pairs)
-      [3] Retrieved chunks (via similarity search)
-      [4] User question
+    This class handles searching the database and responding to user questions.
+    It keeps track of the conversation history to make follow-up questions work smoothly.
     """
 
     def __init__(self, vectorstore: Chroma, repo_url: str = "") -> None:
@@ -104,7 +90,7 @@ class RepoQA:
             streaming=True,
         )
 
-        # Slim history: list of {role, content} dicts (bare Q+A only, no injected context)
+        # Holds the history of the conversation as a list of user/assistant messages
         self.history: list[dict] = []
 
     def _trim_history(self) -> list[dict]:
@@ -115,7 +101,7 @@ class RepoQA:
         self.history.append({"role": "assistant",  "content": answer})
 
     def stream_answer(self, question: str) -> Iterator[str]:
-        """Stream answer tokens. Appends source citations, then records the turn."""
+        """Finds relevant code chunks, streams the answer in real-time, and cites the sources."""
         docs        = self.vs.similarity_search(question, k=TOP_K)
         context     = _format_docs(docs)
         messages    = _build_messages(
@@ -141,7 +127,7 @@ class RepoQA:
         self._record_turn(question, full_response)
 
     def answer(self, question: str) -> tuple[str, list[Document]]:
-        """Non-streaming answer. Returns (text, source_docs)."""
+        """Finds relevant code chunks and returns the complete answer and source documents at once."""
         docs        = self.vs.similarity_search(question, k=TOP_K)
         context     = _format_docs(docs)
         messages    = _build_messages(
@@ -160,17 +146,15 @@ class RepoQA:
         return response.content, docs
 
     def summarize_repo(self) -> Iterator[str]:
-        """Stream a simple greeting/onboarding message."""
+        """Prints a friendly welcome message when the repository is first loaded."""
         yield "Hello! I am a naive RAG assistant for this repository. Ask me anything about the codebase."
 
     def clear_history(self) -> None:
-        """Reset conversation history."""
+        """Wipes the conversation history to start fresh."""
         self.history = []
 
 
-# ---------------------------------------------------------------------------
-# Convenience loader (used by app.py)
-# ---------------------------------------------------------------------------
+# Helper function to easily load the Q&A engine from our main application
 
 def load_qa(repo_id: str, repo_url: str = "") -> RepoQA:
     collection = f"{COLLECTION_NAME}_{repo_id}"

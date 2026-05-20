@@ -1,7 +1,6 @@
-"""
-ingest.py — GitHub repo ingestion pipeline
-Clones a repo, chunks code intelligently by language, embeds, and stores in Chroma.
-"""
+# This file handles importing a GitHub repository.
+# It clones the repo, cuts the code files into small pieces (chunking),
+# converts them into numbers (embeddings), and saves them into our Chroma database.
 
 import os
 import shutil
@@ -20,14 +19,12 @@ from langchain_chroma import Chroma
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+# Basic settings for our database and folder paths
 
 CHROMA_DIR = "./chroma_db"
 COLLECTION_NAME = "github_repo"
 
-# Extensions we care about, mapped to LangChain Language enum for smart splitting
+# Maps file extensions to their programming languages so we can split them correctly
 LANGUAGE_MAP: dict[str, Language | None] = {
     ".py":   Language.PYTHON,
     ".js":   Language.JS,
@@ -52,7 +49,7 @@ LANGUAGE_MAP: dict[str, Language | None] = {
     ".toml": None,
 }
 
-# Files/dirs to always skip
+# A list of folder names we want to skip (like virtual envs or cache folders)
 SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
     "dist", "build", ".next", ".nuxt", "coverage", ".pytest_cache",
@@ -69,23 +66,22 @@ CHUNK_SIZE     = 1_000     # tokens approx; LangChain uses chars internally
 CHUNK_OVERLAP  = 150
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# Useful helper functions for cloning, navigating, and building the repo structure
 
+#Clone a github repo using GitPython,shallow clone
 def clone_repo(url: str, target_dir: str) -> None:
-    """Clone a GitHub repo (shallow) into target_dir."""
+    """Clones a GitHub repository using a shallow clone (depth=1) to save time and space."""
     print(f"  Cloning {url} ...")
     git.Repo.clone_from(url, target_dir, depth=1)
 
-
+#Extract a short id from repo url using hashing to store in db
 def repo_id_from_url(url: str) -> str:
-    """Derive a stable short ID from the repo URL."""
+    """Generates a consistent short ID for the repository using its URL."""
     return hashlib.sha1(url.encode()).hexdigest()[:10]
 
 
 def walk_repo(repo_dir: str) -> Generator[Path, None, None]:
-    """Yield every relevant file path in the repo."""
+    """Finds and lists all the code and text files in the repository that we care about."""
     root = Path(repo_dir)
     for path in root.rglob("*"):
         if path.is_dir():
@@ -106,9 +102,8 @@ def walk_repo(repo_dir: str) -> Generator[Path, None, None]:
 
 def build_directory_tree(repo_dir: str, max_depth: int = 4) -> str:
     """
-    Build a compact text tree of the repo structure.
-    This is injected as a special 'meta' document so the LLM always has
-    bird's-eye context about where things live.
+    Creates a text-based tree view of the folders and files.
+    This gives the AI a bird's-eye view of how the repository is structured.
     """
     root = Path(repo_dir)
     lines = [root.name + "/"]
@@ -131,7 +126,7 @@ def build_directory_tree(repo_dir: str, max_depth: int = 4) -> str:
 
 
 def load_and_chunk_file(path: Path, repo_dir: str) -> list[Document]:
-    """Read a file and split it into Documents using the right splitter."""
+    """Reads a file and splits it into smaller parts using a language-specific splitter."""
     try:
         content = path.read_text(encoding="utf-8", errors="ignore")
     except Exception as e:
@@ -145,7 +140,7 @@ def load_and_chunk_file(path: Path, repo_dir: str) -> list[Document]:
     ext = path.suffix.lower()
     lang = LANGUAGE_MAP.get(ext) or LANGUAGE_MAP.get(path.name)
 
-    # Pick splitter
+    # Choose the right splitting tool based on the programming language
     if lang is not None:
         splitter = RecursiveCharacterTextSplitter.from_language(
             language=lang,
@@ -167,7 +162,7 @@ def load_and_chunk_file(path: Path, repo_dir: str) -> list[Document]:
 
     chunks = splitter.create_documents([content], metadatas=[metadata])
 
-    # Add chunk index so we can reconstruct order later
+    # Save the chunk's index and total count so we can put them back together in order if needed
     for i, chunk in enumerate(chunks):
         chunk.metadata["chunk_index"] = i
         chunk.metadata["total_chunks"] = len(chunks)
@@ -175,15 +170,12 @@ def load_and_chunk_file(path: Path, repo_dir: str) -> list[Document]:
     return chunks
 
 
-# ---------------------------------------------------------------------------
-# Main ingestion entry point
-# ---------------------------------------------------------------------------
+# Main entry point for ingestion
 
 def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
     """
-    Ingest a GitHub repo into Chroma.
-    Returns (vectorstore, repo_id).
-    Skips ingestion if already done (unless force_reingest=True).
+    This is the main function that coordinates cloning, chunking, and saving
+    the GitHub repository into our Chroma database.
     """
     repo_id = repo_id_from_url(repo_url)
     collection = f"{COLLECTION_NAME}_{repo_id}"
@@ -214,7 +206,7 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
     try:
         clone_repo(repo_url, tmp)
 
-        # --- Layer 1: directory tree as a meta document ---
+        # Phase 1: Build the directory structure map so the LLM knows where files live
         print("  Building directory tree ...")
         tree_text = build_directory_tree(tmp)
         tree_doc = Document(
@@ -222,7 +214,7 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
             metadata={"source": "__directory_tree__", "file_name": "__tree__", "language": "text", "extension": ""},
         )
 
-        # --- Layer 2 + 3: docs and source code ---
+        # Phase 2: Read, split, and organize the actual documentation and source code files
         print("  Walking and chunking files ...")
         all_docs: list[Document] = [tree_doc]
         file_count = 0
@@ -235,9 +227,8 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
 
         print(f"  Processed {file_count} files → {len(all_docs)} chunks")
 
-        # --- Embed and store ---
+        # Convert chunks into vector numbers and save them to the database
         print("  Embedding and storing in Chroma ...")
-        # Chroma has a batch limit; process in batches of 500
         BATCH = 500
         vs = None
         for i in range(0, len(all_docs), BATCH):
@@ -261,7 +252,6 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
 
 
 if __name__ == "__main__":
-    import sys
-    url = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/tiangolo/fastapi"
+    url = "https://github.com/tiangolo/fastapi"
     vs, rid = ingest(url)
     print(f"Vectorstore ready. Repo ID: {rid}")

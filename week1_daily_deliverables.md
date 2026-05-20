@@ -253,14 +253,58 @@ flowchart TD
 
 ---
 
+## Day 5 — Simple Streamlit UI, 6-Layer Context mechanics & Future Roadmap
+
+**Date:** Day 5
+
+### What I Did
+
+Day 5 was about bringing all our engineering progress together into a production-grade, interactive showpiece. I built a simple and clean developer dashboard in Streamlit (`app.py`) called **GitScope RAG** to showcase the context-engineered RAG pipeline in action. To make the interface fast, responsive, and completely native, I avoided custom CSS files, emojis, logos, or tabs, focusing purely on a lightweight chat experience that gets out of the way.
+
+Additionally, I evaluated the core mechanics of our RAG design and outlined the upcoming updates in our engineering roadmap below:
+
+#### The 6-Layer Context Window (Why it Works)
+To ensure the LLM receives the highest-quality input, we structure the prompt into 6 precise layers:
+1. **System Prompt (Rules):** Sets the role (expert developer) and forces file citations while preventing hallucinations.
+2. **Repo Card (Bird's-eye View):** A high-level overview generated once at startup. Pinned near the top so the model stays grounded in the codebase structure regardless of the query.
+3. **Conversation History:** A lean sliding window of the last 6 Q&A turns, keeping state without bloating tokens.
+4. **Retrieved Code Chunks:** The actual relevant files fetched via vector search.
+5. **Output Format Hint:** Detected from the question intent (e.g. "where", "explain") to prompt the LLM to format answers consistently.
+6. **User Question:** Placed at the very bottom so the LLM acts on the user's latest query immediately.
+
+*Noise Prevention:* We skip binaries and build/lock files, use Maximum Marginal Relevance (MMR) to pick diverse chunks rather than duplicates, and use HyDE (Hypothetical Document Embeddings) to convert conversational questions into hypothetical code answers before vector matching.
+
+#### Risks & Future Roadmap
+Evaluating our system highlighted key areas for next-step upgrades:
+- **Risk 1: Lost in the Middle:** Very large contexts can cause the model to overlook middle tokens. 
+- **Risk 2: Naive Syntax Splitting:** Character-based chunking can break functions or logic blocks in half.
+- **Risk 3: Keyword Failure:** Dense vector search struggles to find exact keyword symbols or variable names.
+
+*Upcoming Upgrades:*
+1. **Hybrid Search (Dense + Sparse BM25):** Merging keyword match search with vector search.
+2. **AST-Based Chunking (Tree-sitter):** Chunking code exactly at Abstract Syntax Tree boundaries (classes and functions).
+3. **Cross-Encoder Reranking:** Fetching a larger pool of chunks and reranking them using a cross-encoder to filter out noise before prompting the LLM.
+
+### Key Implementations
+- Built the **GitScope RAG chat application** using native Streamlit inputs and chat stream APIs.
+- Integrated a **Quick Questions side-panel** to bypass typing friction and enable instant testing.
+- Documented the design mechanics of our 6-layer context window and next-generation upgrades.
+
+### What I Learned
+- **Prompt structure determines output quality:** Ordering prompts cleanly (System -> Context -> History -> User Question) significantly improves LLM reasoning.
+- **Anticipate keyword failures:** Pure vector RAG needs keyword assistance (like BM25) to reliably locate specific symbols or variables.
+
+---
+
 ## Weekly Summary
 
 | Day | Focus Area | Key Output |
 |-----|-----------|------------|
 | Day 1 | Azure OpenAI setup & Prompt Engineering | `summary.py` — meeting summarizer with streaming |
-| Day 2 | Multi-turn chat, Pydantic structured validation & output parsing | `interactive_chat.py`, `invoking_llm.py`, `main_langchain.py` |
-| Day 3 | Naive RAG — load, chunk, embed, store, retrieve, answer | `rag.py` (policy docs), `ingest.py`, `qa_engine.py` |
-| Day 4 | Context Engineering — HyDE, MMR, repo card, format hints | Refined `qa_engine.py` with a deliberate 6-layer context window |
+| Day 2 | Multi-turn chat, Pydantic structured validation & output parsing | `interactive_chat.py`, `invoking_llm.py`, `main_langchain.py`, `pydantic_validation.py` |
+| Day 3 | Naive RAG — load, chunk, embed, store, retrieve, answer | `rag.py` (policy docs), `ingest.py`, `qa_engine.py`, `main.py` (CLI app) |
+| Day 4 | Context Engineering — HyDE, MMR, repo card, format hints | Refined `qa_engine.py` & `app.py` (6-layer context window) |
+| Day 5 | Simple Streamlit Demo & Evaluation | `app.py` — simple native Streamlit dashboard (GitScope RAG) |
 
 **Technologies used this week:** Python, Azure OpenAI (GPT-4.1-mini, text-embedding-ada-002), LangChain, ChromaDB, GitPython, Streamlit, Pydantic, dotenv
 

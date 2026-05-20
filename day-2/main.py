@@ -2,6 +2,7 @@ import os
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
+# Load keys and endpoints from environment file
 load_dotenv()
 
 endpoint = "https://bo-ai-dev-api.openai.azure.com/openai/deployments/gpt-4.1-mini/chat/completions?api-version=2025-01-01-preview"
@@ -11,12 +12,14 @@ deployment = "gpt-4.1-mini"
 subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
 api_version = "2024-12-01-preview"
 
+# Set up the Azure OpenAI client
 client = AzureOpenAI(
     api_version=api_version,
     azure_endpoint=endpoint,
     api_key=subscription_key,
 )
 
+# Call the model with a list of historical messages showing a context conversation
 response = client.chat.completions.create(
     messages=[
         {
@@ -45,8 +48,10 @@ response = client.chat.completions.create(
     model=deployment
 )
 
+# Stream the assistant's answer chunk-by-chunk for a smooth user experience
 for chunk in response:
     if chunk.choices and chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="", flush=True)
 
-client.close()
+# Close the API connection
+client.close()

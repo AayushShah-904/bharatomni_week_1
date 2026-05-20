@@ -118,7 +118,8 @@ client.close()
 
 
 
-#valideata input and output from pyandianitc
-# quato
-# api server
-# half way server crash
+# Future improvements to consider for production-ready code:
+# 1. Use Pydantic to strictly validate inputs and outputs instead of manual dictionary checks.
+# 2. Add API quota and rate-limiting handlers to avoid hitting Azure OpenAI limits.
+# 3. Add robust error handling in case the API server goes down.
+# 4. Implement retry logic/graceful failure if the connection drops mid-way.

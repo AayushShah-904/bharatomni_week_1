@@ -1,0 +1,150 @@
+import os
+import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# 1. Configure the page's appearance and title
+st.set_page_config(
+    page_title="GitScope RAG - Codebase Analyzer",
+    layout="wide",
+)
+
+st.title("GitScope RAG")
+st.write("Analyze, search, and understand complex GitHub repositories with advanced context engineering")
+
+# 2. Initialize session state variables
+if "repo_url"   not in st.session_state: st.session_state.repo_url   = ""
+if "repo_id"    not in st.session_state: st.session_state.repo_id    = None
+if "qa"         not in st.session_state: st.session_state.qa         = None
+if "messages"   not in st.session_state: st.session_state.messages   = []
+if "summarized" not in st.session_state: st.session_state.summarized = False
+
+
+# 3. Create the sidebar where users can input the GitHub repository URL
+with st.sidebar:
+    st.header("Repository Configuration")
+
+    repo_url = st.text_input(
+        "GitHub Repository URL",
+        placeholder="https://github.com/owner/repo",
+        value=st.session_state.repo_url,
+    )
+
+    force = st.checkbox("Force re-ingest", value=False,
+                        help="Force re-cloning and embedding even if already indexed in ChromaDB")
+
+    ingest_btn = st.button("Load & Index Repository", type="primary", use_container_width=True)
+
+    st.divider()
+    
+    st.markdown("### Chat Management")
+    if st.button("Clear Conversation", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.summarized = False
+        if st.session_state.qa:
+            st.session_state.qa.clear_history()
+        st.success("Chat history cleared!")
+        st.rerun()
+
+
+# 4. Handle the repository ingestion process (cloning, chunking, and embedding)
+if ingest_btn and repo_url:
+    if not os.getenv("AZURE_OPENAI_API_KEY") or not os.getenv("AZURE_OPENAI_ENDPOINT"):
+        st.error("Azure credentials not found in environment. Please write them in your `.env` file.")
+        st.stop()
+
+    st.session_state.repo_url   = repo_url
+    st.session_state.messages   = []
+    st.session_state.summarized = False
+    st.session_state.qa         = None
+
+    with st.spinner("Cloning and indexing codebase (takes ~1-2 mins for medium repos) ..."):
+        try:
+            from ingest import ingest
+            vs, repo_id = ingest(repo_url, force_reingest=force)
+        except Exception as e:
+            st.error(f"Ingestion failed: {e}")
+            st.stop()
+
+    with st.spinner("Building pinned repository card (~15 secs) ..."):
+        try:
+            from qa_engine import RepoQA
+            st.session_state.qa      = RepoQA(vs, repo_url=repo_url)
+            st.session_state.repo_id = repo_id
+        except Exception as e:
+            st.error(f"Failed to generate repository card: {e}")
+            st.stop()
+
+    st.success("Repository indexed successfully! Check out the dashboard below.")
+    st.rerun()
+
+
+# --- INTERACTIVE Q&A CHAT ---
+if not st.session_state.qa:
+    st.info("Enter a public GitHub repository URL in the sidebar and click Load & Index Repository to start exploring.")
+    
+    st.markdown("""
+    ### Try these popular public repositories:
+    - `https://github.com/pallets/click` (Python CLI creation kit)
+    - `https://github.com/tiangolo/fastapi` (FastAPI framework)
+    - `https://github.com/requests/requests` (HTTP library)
+    """)
+else:
+    col_chat, col_examples = st.columns([3, 1.2])
+
+    with col_examples:
+        st.markdown("### Quick Questions")
+        st.caption("Click any question to ask it instantly:")
+        
+        examples = [
+            ("Tech Stack & Summary", "What is the tech stack and main purpose of this repository?"),
+            ("Key Entry Points", "Which files are the main entry points where execution starts?"),
+            ("Project Structure", "Summarize the project structure and folder layout."),
+            ("Q&A Engine Design", "How does the RepoQA class retrieve code and structure the context window?"),
+            ("Noise Filtering", "What mechanisms are used to make sure noisy information is not added to the context?")
+        ]
+        
+        clicked_question = None
+        for label, question in examples:
+            if st.button(label, key=f"btn_{label}", use_container_width=True):
+                clicked_question = question
+
+    with col_chat:
+        st.markdown(f"**Current Repo:** `{st.session_state.repo_url}`")
+        
+        # Auto-onboard user with repository summary on first load
+        if not st.session_state.summarized:
+            st.session_state.summarized = True
+            with st.chat_message("assistant"):
+                st.write_stream(st.session_state.qa.summarize_repo())
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": "(Project summary generated above)"
+            })
+
+        # Display past messages
+        for msg in st.session_state.messages:
+            if msg["content"] != "(Project summary generated above)":
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+
+        # Detect if user clicked an example question
+        active_prompt = None
+        if clicked_question:
+            active_prompt = clicked_question
+        
+        # Or get text from standard chat input box
+        if chat_prompt := st.chat_input("Ask anything about the repo ..."):
+            active_prompt = chat_prompt
+
+        if active_prompt:
+            st.session_state.messages.append({"role": "user", "content": active_prompt})
+            with st.chat_message("user"):
+                st.markdown(active_prompt)
+
+            with st.chat_message("assistant"):
+                full_response = st.write_stream(st.session_state.qa.stream_answer(active_prompt))
+
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            st.rerun()

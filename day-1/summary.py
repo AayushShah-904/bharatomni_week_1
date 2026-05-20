@@ -56,22 +56,32 @@ client.close()
  
 
 
-# Weak prompt
-# Summarize this document.
-# Improved prompt
-# You are a project assistant. Summarize the document for a project lead in 5 bullet points. Focus on goals, deadlines, risks, and decisions.
-# Do not include minor details. Add an Open Questions section for anything important that is unclear.
+# --- Prompt Engineering Practice Examples ---
+# Let's look at some examples of how to improve simple/weak prompts to get much better results.
+
+# Example 1: Summarizing a document
+# Avoid this weak prompt:
+#   "Summarize this document."
+# Instead, try a more specific, role-based prompt:
+#   "You are a project assistant. Summarize the document for a project lead in 5 bullet points. 
+#   Focus on goals, deadlines, risks, and decisions. Do not include minor details. 
+#   Add an 'Open Questions' section for anything important that is unclear."
 
 
-# Weak prompt
-# Find the action items.
-# Improved prompt
-# You are a meeting notes assistant. Extract all action items from the notes below. Return a table with the columns: Owner, Task, Deadline, 
-# and Status. If the owner or deadline is missing, write Not specified. Include only tasks that are clearly assigned or strongly implied.
+# Example 2: Finding action items in meeting notes
+# Avoid this weak prompt:
+#   "Find the action items."
+# Instead, tell the model exactly how to format the output:
+#   "You are a meeting notes assistant. Extract all action items from the notes below. 
+#   Return a table with columns: Owner, Task, Deadline, and Status. If the owner or deadline is missing, 
+#   write 'Not specified'. Include only tasks that are clearly assigned or strongly implied."
 
 
-# Weak prompt
-# Classify this feedback.
-# Improved prompt
-# You are a customer support analyst. Classify each feedback item into one category: billing, technical, account, or other. Return 
-# JSON with the fields id, category, and reason. If a message could fit multiple categories, choose the most important one and explain the decision briefly.
+# Example 3: Classifying customer feedback
+# Avoid this weak prompt:
+#   "Classify this feedback."
+# Instead, specify categories, structure, and request reasoning:
+#   "You are a customer support analyst. Classify each feedback item into one category: billing, 
+#   technical, account, or other. Return JSON with the fields: id, category, and reason. 
+#   If a message could fit multiple categories, choose the most important one and explain the decision briefly."
+
