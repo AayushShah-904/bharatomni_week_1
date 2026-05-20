@@ -20,7 +20,6 @@ from langchain_chroma import Chroma
 load_dotenv()
 
 # Basic settings for our database and folder paths
-
 CHROMA_DIR = "./chroma_db"
 COLLECTION_NAME = "github_repo"
 
@@ -68,13 +67,12 @@ CHUNK_OVERLAP  = 150
 
 # Useful helper functions for cloning, navigating, and building the repo structure
 
-#Clone a github repo using GitPython,shallow clone
 def clone_repo(url: str, target_dir: str) -> None:
     """Clones a GitHub repository using a shallow clone (depth=1) to save time and space."""
     print(f"  Cloning {url} ...")
     git.Repo.clone_from(url, target_dir, depth=1)
 
-#Extract a short id from repo url using hashing to store in db
+
 def repo_id_from_url(url: str) -> str:
     """Generates a consistent short ID for the repository using its URL."""
     return hashlib.sha1(url.encode()).hexdigest()[:10]
@@ -98,31 +96,6 @@ def walk_repo(repo_dir: str) -> Generator[Path, None, None]:
             print(f"    Skipping large file: {path.relative_to(root)}")
             continue
         yield path
-
-
-def build_directory_tree(repo_dir: str, max_depth: int = 4) -> str:
-    """
-    Creates a text-based tree view of the folders and files.
-    This gives the AI a bird's-eye view of how the repository is structured.
-    """
-    root = Path(repo_dir)
-    lines = [root.name + "/"]
-
-    def _recurse(directory: Path, prefix: str, depth: int) -> None:
-        if depth > max_depth:
-            return
-        entries = sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name))
-        for i, entry in enumerate(entries):
-            if entry.name in SKIP_DIRS or entry.name.startswith("."):
-                continue
-            connector = "└── " if i == len(entries) - 1 else "├── "
-            lines.append(prefix + connector + entry.name + ("/" if entry.is_dir() else ""))
-            if entry.is_dir():
-                extension = "    " if i == len(entries) - 1 else "│   "
-                _recurse(entry, prefix + extension, depth + 1)
-
-    _recurse(root, "", 1)
-    return "\n".join(lines)
 
 
 def load_and_chunk_file(path: Path, repo_dir: str) -> list[Document]:
@@ -206,17 +179,9 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
     try:
         clone_repo(repo_url, tmp)
 
-        # Phase 1: Build the directory structure map so the LLM knows where files live
-        print("  Building directory tree ...")
-        tree_text = build_directory_tree(tmp)
-        tree_doc = Document(
-            page_content=f"# Repository structure\n\n```\n{tree_text}\n```",
-            metadata={"source": "__directory_tree__", "file_name": "__tree__", "language": "text", "extension": ""},
-        )
-
-        # Phase 2: Read, split, and organize the actual documentation and source code files
+        # Read, split, and organize the actual documentation and source code files
         print("  Walking and chunking files ...")
-        all_docs: list[Document] = [tree_doc]
+        all_docs: list[Document] = []
         file_count = 0
 
         for file_path in walk_repo(tmp):
@@ -252,6 +217,7 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
 
 
 if __name__ == "__main__":
-    url = "https://github.com/tiangolo/fastapi"
+    import sys
+    url = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/tiangolo/fastapi"
     vs, rid = ingest(url)
     print(f"Vectorstore ready. Repo ID: {rid}")
