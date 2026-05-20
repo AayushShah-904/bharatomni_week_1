@@ -56,25 +56,6 @@ with st.sidebar:
     ingest_btn = st.button("Load repo", type="primary", use_container_width=True)
 
     st.divider()
-
-    # Quick-question presets
-    st.subheader("Quick questions")
-    PRESETS = [
-        "Summarize this project",
-        "What is the tech stack?",
-        "Where does execution start?",
-        "How does authentication work?",
-        "How is the database accessed?",
-        "What are the main API endpoints?",
-        "How are errors handled?",
-        "What does the test suite cover?",
-    ]
-    for q in PRESETS:
-        if st.button(q, use_container_width=True, disabled=st.session_state.qa is None):
-            st.session_state.messages.append({"role": "user", "content": q})
-            st.rerun()
-
-    st.divider()
     if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.session_state.summarized = False
@@ -105,13 +86,13 @@ if ingest_btn and repo_url:
             st.error(f"Ingestion failed: {e}")
             st.stop()
 
-    with st.spinner("Building repo card and context (one-time, ~15 sec) ..."):
+    with st.spinner("Initializing Q&A engine ..."):
         try:
             from qa_engine import RepoQA
             st.session_state.qa      = RepoQA(vs, repo_url=repo_url)
             st.session_state.repo_id = repo_id
         except Exception as e:
-            st.error(f"Context build failed: {e}")
+            st.error(f"Initialization failed: {e}")
             st.stop()
 
     st.success("Repo indexed! Ask anything below.")
