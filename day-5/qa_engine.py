@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Iterator
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -81,6 +84,28 @@ def _format_docs(docs: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
+def _log_context(messages: list[dict], label: str = "LLM CONTEXT") -> None:
+    """
+    Show the full messages payload to the logger at DEBUG level.
+    Each message is printed with a role banner so the context window
+    is easy to read in the log output.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    sep = "=" * 72
+    lines = [f"\n{sep}", f"  {label}", sep]
+    for i, msg in enumerate(messages, 1):
+        role = msg.get("role", "unknown").upper()
+        content = msg.get("content", "")
+        lines.append(f"\n--- Message {i} | role={role} ---")
+        lines.append(content)
+    total_chars = sum(len(m.get("content", "")) for m in messages)
+    lines.append(f"\n{sep}")
+    lines.append(f"  Total messages: {len(messages)} | Total chars: {total_chars:,}")
+    lines.append(sep)
+    logger.debug("\n".join(lines))
+
+
 def _build_messages(
     question: str,  
     context: str,
@@ -125,6 +150,7 @@ def _build_messages(
         ),
     })
 
+    _log_context(messages, label="_build_messages → LLM CONTEXT")
     return messages
 
 
@@ -147,14 +173,18 @@ Be factual and concise. Use only what you can see in the provided context.
 """
 
 def build_repo_card(vs: Chroma, llm: AzureChatOpenAI) -> str:
+    logger.info("Building repository card ...")
     tree_docs   = vs.similarity_search("repository structure directory tree", k=1)
     readme_docs = vs.similarity_search("README project overview purpose install", k=3)
     context = _format_docs(tree_docs + readme_docs)
 
-    response = llm.invoke([
+    repo_card_messages = [
         {"role": "system", "content": "You summarize software repositories concisely and accurately."},
         {"role": "user",   "content": REPO_CARD_PROMPT.format(context=context)},
-    ])
+    ]
+    _log_context(repo_card_messages, label="build_repo_card → LLM CONTEXT")
+    response = llm.invoke(repo_card_messages)
+    logger.info("Repository card generated (%d chars).", len(response.content))
     return response.content
 
 
@@ -173,11 +203,14 @@ not shown to the user.
 
 def _hyde_retrieve(question: str, vs: Chroma, llm: AzureChatOpenAI) -> list[Document]:
     try:
+        logger.debug("HyDE: generating hypothetical answer for query: %r", question[:80])
         hypothetical = llm.invoke([
             {"role": "user", "content": HYDE_PROMPT.format(question=question)},
         ])
         search_text = hypothetical.content
-    except Exception:
+        logger.debug("HyDE: hypothetical snippet generated (%d chars).", len(search_text))
+    except Exception as exc:
+        logger.warning("HyDE generation failed (%s); falling back to raw query.", exc)
         search_text = question  # graceful fallback
 
     raw_docs = vs.max_marginal_relevance_search(search_text, k=TOP_K, fetch_k=FETCH_K)
@@ -190,6 +223,10 @@ def _hyde_retrieve(question: str, vs: Chroma, llm: AzureChatOpenAI) -> list[Docu
         if source == "__directory_tree__" or not doc.page_content.strip():
             continue
         filtered_docs.append(doc)
+    logger.debug(
+        "Retrieved %d docs after MMR+filter (from pool of %d).",
+        len(filtered_docs), len(raw_docs),
+    )
     return filtered_docs
 
 
@@ -213,6 +250,7 @@ class RepoQA:
             temperature=0,
             streaming=True,
         )
+        logger.info("RepoQA initialised for repo: %s", repo_url or "(unknown)")
 
         # [2] Built once, reused every call
         self.repo_card: str = build_repo_card(vectorstore, self.llm)
@@ -229,6 +267,7 @@ class RepoQA:
 
     def stream_answer(self, question: str) -> Iterator[str]:
         """Finds relevant code, streams the answer in real-time, and adds sources."""
+        logger.info("stream_answer called | question: %r", question[:100])
         docs        = _hyde_retrieve(question, self.vs, self.llm)
         context     = _format_docs(docs)
         format_hint = _format_hint(question)
@@ -252,10 +291,15 @@ class RepoQA:
             yield citation_block
             full_response += citation_block
 
+        logger.info(
+            "stream_answer complete | %d source(s) cited | response length: %d chars",
+            len(sources), len(full_response),
+        )
         self._record_turn(question, full_response)
 
     def answer(self, question: str) -> tuple[str, list[Document]]:
         """Finds relevant code and returns the complete answer and source documents at once."""
+        logger.info("answer called | question: %r", question[:100])
         docs        = _hyde_retrieve(question, self.vs, self.llm)
         context     = _format_docs(docs)
         format_hint = _format_hint(question)
@@ -290,6 +334,7 @@ class RepoQA:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": expand_prompt},
         ]
+        _log_context(messages, label="summarize_repo → LLM CONTEXT")
         for chunk in self.llm.stream(messages):
             if chunk.content:
                 yield chunk.content
@@ -297,6 +342,7 @@ class RepoQA:
     def clear_history(self) -> None:
         """Reset conversation history."""
         self.history = []
+        logger.info("Conversation history cleared for repo: %s", self.repo_url or "(unknown)")
 
 
 # Helper function to easily initialize this class from our Streamlit app

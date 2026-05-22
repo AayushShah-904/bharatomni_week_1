@@ -1,8 +1,16 @@
+import logging
 import os
 import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 # 1. Configure the page's appearance and title
 st.set_page_config(
@@ -44,13 +52,16 @@ with st.sidebar:
         st.session_state.summarized = False
         if st.session_state.qa:
             st.session_state.qa.clear_history()
+        logger.info("Chat history cleared by user.")
         st.success("Chat history cleared!")
         st.rerun()
 
 
 # 4. Handle the repository ingestion process (cloning, chunking, and embedding)
 if ingest_btn and repo_url:
+    logger.info("Ingestion triggered for URL: %s (force=%s)", repo_url, force)
     if not os.getenv("AZURE_OPENAI_API_KEY") or not os.getenv("AZURE_OPENAI_ENDPOINT"):
+        logger.error("Azure credentials missing from environment.")
         st.error("Azure credentials not found in environment. Please write them in your `.env` file.")
         st.stop()
 
@@ -64,6 +75,7 @@ if ingest_btn and repo_url:
             from ingest import ingest
             vs, repo_id = ingest(repo_url, force_reingest=force)
         except Exception as e:
+            logger.exception("Ingestion failed for %s: %s", repo_url, e)
             st.error(f"Ingestion failed: {e}")
             st.stop()
 
@@ -73,9 +85,11 @@ if ingest_btn and repo_url:
             st.session_state.qa      = RepoQA(vs, repo_url=repo_url)
             st.session_state.repo_id = repo_id
         except Exception as e:
+            logger.exception("Failed to initialise RepoQA for %s: %s", repo_url, e)
             st.error(f"Failed to generate repository card: {e}")
             st.stop()
 
+    logger.info("Repository indexed successfully: %s (repo_id=%s)", repo_url, repo_id)
     st.success("Repository indexed successfully! Check out the dashboard below.")
     st.rerun()
 
@@ -139,6 +153,7 @@ else:
             active_prompt = chat_prompt
 
         if active_prompt:
+            logger.info("User query received: %r", active_prompt[:120])
             st.session_state.messages.append({"role": "user", "content": active_prompt})
             with st.chat_message("user"):
                 st.markdown(active_prompt)

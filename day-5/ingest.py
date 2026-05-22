@@ -2,6 +2,14 @@
 # It clones the repo, cuts the code files into small pieces (chunking),
 # converts them into numbers (embeddings), and saves them into our Chroma database.
 
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 import os
 import shutil
 import tempfile
@@ -70,8 +78,9 @@ CHUNK_OVERLAP  = 150
 
 def clone_repo(url: str, target_dir: str) -> None:
     """Clones a GitHub repository using a shallow clone (depth=1) to save time and space."""
-    print(f"  Cloning {url} ...")
+    logger.info("Cloning repository: %s", url)
     git.Repo.clone_from(url, target_dir, depth=1)
+    logger.debug("Clone complete -> %s", target_dir)
 
 
 def repo_id_from_url(url: str) -> str:
@@ -94,7 +103,7 @@ def walk_repo(repo_dir: str) -> Generator[Path, None, None]:
         if path.suffix.lower() not in LANGUAGE_MAP and path.name not in LANGUAGE_MAP:
             continue
         if path.stat().st_size > MAX_FILE_BYTES:
-            print(f"    Skipping large file: {path.relative_to(root)}")
+            logger.debug("Skipping large file (>%d B): %s", MAX_FILE_BYTES, path.relative_to(root))
             continue
         yield path
 
@@ -129,7 +138,7 @@ def load_and_chunk_file(path: Path, repo_dir: str) -> list[Document]:
     try:
         content = path.read_text(encoding="utf-8", errors="ignore")
     except Exception as e:
-        print(f"    Could not read {path.name}: {e}")
+        logger.warning("Could not read file %s: %s", path.name, e)
         return []
 
     if not content.strip():
@@ -194,11 +203,16 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
                 embedding_function=embeddings,
                 persist_directory=CHROMA_DIR,
             )
-            if vs._collection.count() > 0:
-                print(f"  Already ingested ({vs._collection.count()} chunks). Use force_reingest=True to redo.")
+            chunk_count = vs._collection.count()
+            if chunk_count > 0:
+                logger.info(
+                    "Collection '%s' already has %d chunks — skipping ingestion. "
+                    "Set force_reingest=True to redo.",
+                    collection, chunk_count,
+                )
                 return vs, repo_id
         except Exception:
-            pass
+            logger.debug("Could not read existing collection '%s'; will re-ingest.", collection)
 
     # Clone into a temp dir
     tmp = tempfile.mkdtemp()
@@ -206,7 +220,7 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
         clone_repo(repo_url, tmp)
 
         # Phase 1: Build the directory structure map so the LLM knows where files live
-        print("  Building directory tree ...")
+        logger.info("Building directory tree ...")
         tree_text = build_directory_tree(tmp)
         tree_doc = Document(
             page_content=f"# Repository structure\n\n```\n{tree_text}\n```",
@@ -214,7 +228,7 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
         )
 
         # Phase 2: Read, split, and organize the actual documentation and source code files
-        print("  Walking and chunking files ...")
+        logger.info("Walking and chunking repository files ...")
         all_docs: list[Document] = [tree_doc]
         file_count = 0
 
@@ -224,10 +238,10 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
                 all_docs.extend(chunks)
                 file_count += 1
 
-        print(f"  Processed {file_count} files → {len(all_docs)} chunks")
+        logger.info("Processed %d files → %d total chunks", file_count, len(all_docs))
 
         # Convert chunks to vector numbers and save them in the database in batches of 500
-        print("  Embedding and storing in Chroma ...")
+        logger.info("Embedding and storing chunks in Chroma (batch size=%d) ...", BATCH)
         BATCH = 500
         vs = None
         for i in range(0, len(all_docs), BATCH):
@@ -241,9 +255,9 @@ def ingest(repo_url: str, force_reingest: bool = False) -> tuple[Chroma, str]:
                 )
             else:
                 vs.add_documents(batch)
-            print(f"    Stored {min(i + BATCH, len(all_docs))}/{len(all_docs)} chunks ...")
+            logger.info("Stored %d / %d chunks ...", min(i + BATCH, len(all_docs)), len(all_docs))
 
-        print(f"  Done. {len(all_docs)} chunks in collection '{collection}'.")
+        logger.info("Ingestion complete. %d chunks stored in collection '%s'.", len(all_docs), collection)
         return vs, repo_id
 
     finally:
@@ -254,4 +268,4 @@ if __name__ == "__main__":
     import sys
     url = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/tiangolo/fastapi"
     vs, rid = ingest(url)
-    print(f"Vectorstore ready. Repo ID: {rid}")
+    logger.info("Vectorstore ready. Repo ID: %s", rid)
